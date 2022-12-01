@@ -117,7 +117,7 @@ class Authentication:
         f.close()
 
 
-    def compute_fd(self, iteration, lower_bounds, upper_bounds, outputFileName,count):
+    def executeData(self, iteration, lower_bounds, upper_bounds, outputFileName,count):
         #start the connections
         with self.engine.begin() as conn:
             file = open(outputFileName, 'a')
@@ -166,8 +166,71 @@ class Authentication:
 
                 # writing the data into arg table for furture reference
                 conn.execute(text("INSERT INTO "+curr[0]+curr[1]+"_agg(inserttime, avgfxrate , prev_avg, min_val, max_val, vol_val, fd, return) VALUES (:inserttime, :avgfxrate, , :prev_avg, :min_val, :max_val, :vol_val, :fd, :return);"),
-                [{"inserttime": last_date, "avgfxrate": avg_price,  "prev_avg": avg_prev, "min_val": min_price, "max_val": max_price, "vol_val": volatility, "fd": fd, "return": return_fx}])
+                [{"inserttime": last_date, "avgfxrate": avg_price,  "prev_avg": avg_prev_value, "min_val": min_price, "max_val": max_price, "vol_val": volatility, "fd": fd, "return": return_fx}])
 
+                hour_One = 360
+            
+                # At each hour we will call this block of code
+                if count%hour_One == 0:
+                    Total_hour_spent = count//hour_One
+                    print("Hours spent: ", Total_hour_spent)
+
+                    if count <= hour_One:
+                        avg_ret = 0
+                        if curr[4] == -1: 
+                            units_sell = 100
+                            amount = units_sell
+                            curr2 = units_sell
+                            curr[3].currencySell(avg_prev_value, units_sell, avg_ret, amount, curr2)
+                        if curr[4] == 1:
+                            units_buy = 100
+                            amount = units_buy
+                            curr2 = units_buy
+                            curr[3].currencyBuy(avg_prev_value, units_buy, avg_ret, amount, curr2)
+
+                if count > hour_One:
+                    try:
+                        # getting the table count
+                        value_get = conn.execute(text("SELECT COUNT(return) as c_value FROM AUDUSD_agg;"))
+                        for cn in value_get:
+                            cnts1 = cn.c_value
+                        
+                        #Get previous 10 return values
+                        prev_return = conn.execute(text("SELECT return as p_return_value FROM AUDUSD_agg LIMIT "+str(cnts1)+"-10, 10;"))
+                        prev_return_all = []
+                        for each in prev_return:
+                            prev_return_all.append(each.p_return_value)
+                        
+                        #Getting the average value
+                        avg_of_all_returns = sum(prev_return_all)
+
+                        
+                        # losses for each cycle of 260 seconds
+                        losses = [0.250, 0.150, 0.100, 0.050, 0.050, 0.050, 0.050, 0.050, 0.050, 0.050]
+                        
+                        Total_losses = losses[(count//hour_One)-1]
+                        
+                        if abs(avg_of_all_returns) <= Total_losses: 
+
+                            if curr[4] == 0:
+                                print("Trade is done for the day")
+
+                            if curr[4] == 1:
+                                num_to_buy = 100*(1+(count//t1))
+                                amount = num_to_buy
+                                curr2 = num_to_buy
+                                curr[3].currencyBuy(avg_prev_value, num_to_buy, avg_of_all_returns, amount, curr2)
+
+                            if curr[4] == -1:
+                                num_to_sell = 100*(1+(count//t1))
+                                amount = num_to_sell
+                                curr2 = num_to_sell
+                                curr[3].currencySell(avg_prev_value, num_to_sell, avg_of_all_returns, amount, curr2)
+                        else:
+                            curr[4] = 0
+                            
+                    except:
+                        pass                
 
     def getData(self, outputFileName):
         # Number of list iterations - each one should last about 1 second
@@ -200,7 +263,7 @@ class Authentication:
                     return_fx = 0
                 else:
                     # from the second iteration,
-                    self.compute_fd(iteration + 1, previous_lower_bounds, previous_upper_bounds, outputFileName)
+                    self.executeData(iteration + 1, previous_lower_bounds, previous_upper_bounds, outputFileName)
                     previous_lower_bounds = lower_bounds
                     previous_upper_bounds = upper_bounds
                     self.reset_raw_data_tables()
