@@ -1,7 +1,3 @@
-# '''
-# @author: Pruthviraj R Patil
-# @NetID: prp7650
-# '''
 
 import collections
 import datetime
@@ -13,24 +9,6 @@ from sqlalchemy import create_engine
 from sqlalchemy import text
 
 class Authentication:
-    """
-    Fetch Data from polygon API and store in sqllite database
-
-    :param key: polygon.io key store in library credentials
-    :type key: string
-
-    :param currency_pairs: A dictionary defining the set of currency pairs we will be pulling data for.
-    :type currency_pairs: dictionary
-
-    :param count : counter in seconds to check program hits 24 hours.
-    :type count:  int
-
-    :param agg_count: counter in seconds to check if 6 minutes has been reached or not
-    :type agg_count: int
-
-    :param engine : Create an engine to connect to the database; setting echo to false should stop it from logging in std.out
-    :type engine: sqlalchemy.create_engine
-    """
 
     # Init all the necessary variables when instantiating the class
     def __init__(self):
@@ -143,9 +121,6 @@ class Authentication:
 
                 # writing data row-wise into the csv file
                 writer.writerow([iteration, key, min_price, max_price, avg_price, volatility, fd])
-                # writer.writerow({"Min": min_price, "Max": max_price, "Mean": avg_price, "Vol": volatility, "FD": fd})
-
-                # for every 6 minutes, we put 100 data points with min, max, mean, vol, fd to CSV. So, we will have 99 * 100 data points after 10 hours
 
     def getData(self, outputFileName):
         # Number of list iterations - each one should last about 1 second
@@ -216,4 +191,3 @@ class Authentication:
                     conn.execute(text(
                         "INSERT INTO " + from_ + to + "_raw(ticktime, fxrate, inserttime) VALUES (:ticktime, :fxrate, :inserttime)"),
                                  [{"ticktime": dt, "fxrate": avg_price, "inserttime": insert_time}])
-                    # print("inserted", from_+to, dt, avg_price, insert_time)
