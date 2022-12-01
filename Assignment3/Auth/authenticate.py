@@ -50,8 +50,8 @@ class Authentication:
     def initialize_aggregated_tables(self):
         with self.engine.begin() as conn:
             for curr in self.currency_pairs:
-                conn.execute(text("CREATE TABLE " + curr[0] + curr[
-                    1] + "_agg(inserttime text, avgfxrate  numeric, stdfxrate numeric);"))
+                conn.execute(text("CREATE TABLE "+curr[0]+curr[1]+"_agg(inserttime text, avgfxrate numeric, prev_avg numeric, min_val numeric, max_val numeric, vol_val numeric, fd numeric, return numeric);"))
+
     # This function is called every 6 minutes to aggregate the data, store it in the aggregate table, and then delete the raw data
     def calc_keltner_bonds(self, volatility, average):
         upper_bounds = []
@@ -70,7 +70,7 @@ class Authentication:
                 result = conn.execute(text(
                     "SELECT AVG(fxrate) as avg_price, MAX(fxrate) as max_price, MIN(fxrate) as min_price FROM " + curr[0] + curr[1] + "_raw;"))
 
-                #getting avg, max, min for every curr in 6 minutes
+                #getting values in 6 minutes
                 stats_vals = []
                 for row in result:
                     stats_vals.append(row.avg_price)
@@ -87,9 +87,37 @@ class Authentication:
 
         return low_bound_dictionary, upper_bound_dictionary
 
+    def currencyBuy(self, cost, Units, prev_loss, amount, curr2):
+        print("Entered currencyBuy ")
+        if amount >= 1 and amount <=100:
+            amount = amount - Units
+            self.Prev_Action_was_Buy = True
+            curr2 += Units* cost 
+            print("Bought %d worth (%s). Our current profits and losses in the org currency (%s) : %f." % (Units,self.to,self.from_,(amount-1)))
+        else:
+            print("There was not enough (%s) to make another buy." % self.from_)
+        
+        f = open('output1_'+str(self.from_)+str(self.to)+'.csv', 'a', newline='')
+        writer = csv.writer(f)
+        writer.writerow([Units, amount-1, prev_loss])
+        f.close()
 
-    def compute_fd(self, iteration, lower_bounds, upper_bounds, outputFileName):
-        # print(lower_bounds, upper_bounds)
+    def currencySell(self, cost, Units, prev_loss, amount, curr2):
+        if curr2 >= 1 and curr2 <=100:
+            amount += Units * (1/cost)
+            self.Prev_Action_was_Buy = False
+            curr2 -= Units
+            print("Sold %d worth of the target currency (%s). Our current profits and losses in the original currency (%s) are: %f." % (Units,self.to,self.from_,(amount-1)))
+        else:
+            print("There was not enough  (%s) to make another sell." % self.to)   
+        
+        f = open('output1_'+str(self.from_)+str(self.to)+'.csv', 'a', newline='')
+        writer = csv.writer(f)
+        writer.writerow([Units, amount-1, prev_loss])
+        f.close()
+
+
+    def compute_fd(self, iteration, lower_bounds, upper_bounds, outputFileName,count):
         #start the connections
         with self.engine.begin() as conn:
             file = open(outputFileName, 'a')
@@ -99,7 +127,8 @@ class Authentication:
                 key = curr[0] + curr[1]
                 result = conn.execute(text("SELECT fxrate from " + key + "_raw;"))
                 result_stat = conn.execute(text("SELECT AVG(fxrate) as avg_price, MAX(fxrate) as max_price, MIN(fxrate) as min_price FROM " + key + "_raw;"))
-
+                return_fx = 0
+                             
                 # for every bound, check how many data points will cross it
                 count = 0
                 for i in range(100):
@@ -119,8 +148,26 @@ class Authentication:
                     if volatility != 0:
                         fd = count/volatility
 
-                # writing data row-wise into the csv file
-                writer.writerow([iteration, key, min_price, max_price, avg_price, volatility, fd])
+                if count > 120:
+
+                    prev_count = conn.execute(text("SELECT COUNT(prev_avg) as ccnt FROM "+curr[0]+curr[1]+"_agg;"))
+                    for cn in prev_count:
+                        prev_count_value = cn.ccnt
+
+                    last_date = 0
+                    date_res = conn.execute(text("SELECT MAX(ticktime) as last_date FROM "+curr[0]+curr[1]+"_raw;"))
+                    for row in date_res:
+                        last_date = row.last_date
+                    
+                    avg_prev = conn.execute(text("SELECT prev_avg FROM "+curr[0]+curr[1]+"_agg LIMIT "+str(prev_count_value)+"-10, 10;"))
+                    for vls1 in avg_prev:
+                        avg_prev_value = vls1.prev_avg
+
+
+                # writing the data into arg table for furture reference
+                conn.execute(text("INSERT INTO "+curr[0]+curr[1]+"_agg(inserttime, avgfxrate , prev_avg, min_val, max_val, vol_val, fd, return) VALUES (:inserttime, :avgfxrate, , :prev_avg, :min_val, :max_val, :vol_val, :fd, :return);"),
+                [{"inserttime": last_date, "avgfxrate": avg_price,  "prev_avg": avg_prev, "min_val": min_price, "max_val": max_price, "vol_val": volatility, "fd": fd, "return": return_fx}])
+
 
     def getData(self, outputFileName):
         # Number of list iterations - each one should last about 1 second
@@ -129,6 +176,7 @@ class Authentication:
 
         # initaltion of iterations
         iteration = 0
+        return_fx = 0
         # Create the needed tables in the database
         self.initialize_raw_data_tables()
         self.initialize_aggregated_tables()
@@ -139,7 +187,7 @@ class Authentication:
         while count < 86400:  # 86400 seconds = 24 hours
             # print(count, "Seconds over")
             # Make a check to see if 6 minutes has been reached or not
-            if agg_count == 300:
+            if agg_count == 360:
                 # aggregate and get upper and lower bounds
                 lower_bounds, upper_bounds = self.aggregate_raw_data_tables()
                 # print(lower_bounds, upper_bounds)
@@ -149,9 +197,9 @@ class Authentication:
                     previous_upper_bounds = upper_bounds
                     self.reset_raw_data_tables()
                     agg_count = 0
+                    return_fx = 0
                 else:
                     # from the second iteration,
-                    # if count is greater than 1, then we can calculate the violations using the previously stored data points.
                     self.compute_fd(iteration + 1, previous_lower_bounds, previous_upper_bounds, outputFileName)
                     previous_lower_bounds = lower_bounds
                     previous_upper_bounds = upper_bounds
