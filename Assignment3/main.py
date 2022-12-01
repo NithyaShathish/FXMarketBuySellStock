@@ -1,4 +1,5 @@
 from Auth import Authentication
+from Auth.authenticate import Authentication
 import csv
 from polygon.rest import RESTClient
 from sqlalchemy import create_engine 
